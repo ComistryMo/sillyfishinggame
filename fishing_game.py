@@ -93,24 +93,40 @@ LOCATION_FISH_CONFIG = {
 # ==========================
 STATS_FILE = "fishing_stats.json"
 
+def _default_student_state():
+    """默认的女高中生事件状态"""
+    return {
+        'name': '林汐',
+        'met': False,
+        'rescued': False,
+        'trust': 0,
+        'food_stock': 0.0,
+        'encounter_rolls': 0
+    }
+
 def load_statistics():
     """从文件加载统计数据"""
     if os.path.exists(STATS_FILE):
         try:
             with open(STATS_FILE, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-                return data.get('fish_statistics', {}), data.get('money', 0)
+                student_state = data.get('student_state', _default_student_state())
+                # 兜底缺失字段
+                merged_state = _default_student_state()
+                merged_state.update(student_state)
+                return data.get('fish_statistics', {}), data.get('money', 0), merged_state
         except Exception as e:
             print(f"加载统计数据失败: {e}")
-            return {}, 0
-    return {}, 0
+            return {}, 0, _default_student_state()
+    return {}, 0, _default_student_state()
 
-def save_statistics(fish_statistics, money=0):
+def save_statistics(fish_statistics, money=0, student_state=None):
     """保存统计数据到文件"""
     try:
         data = {
             'fish_statistics': fish_statistics,
             'money': money,
+            'student_state': student_state or _default_student_state(),
             'last_update': datetime.datetime.now().isoformat()
         }
         with open(STATS_FILE, 'w', encoding='utf-8') as f:
@@ -136,11 +152,13 @@ class GameState:
         self.current_fish_weight = None  # 当前钓到的鱼的重量
         
         # 从文件加载统计数据
-        self.fish_statistics, self.money = load_statistics()
+        self.fish_statistics, self.money, student_state = load_statistics()
         
         # 预留扩展字段
         self.current_location = "小溪"  # 当前钓鱼地点（默认小溪）
         self.home_data = {}  # 家园数据（预留）
+        self.student_state = student_state
+        self._ensure_student_state()
         
         # 初始化所有鱼的统计数据（如果文件中没有）
         self._init_fish_statistics()
@@ -151,10 +169,73 @@ class GameState:
             for fish_name, _, _, _, _, _ in fish_list:
                 if fish_name not in self.fish_statistics:
                     self.fish_statistics[fish_name] = {'count': 0, 'max_weight': 0.0}
+
+    def _ensure_student_state(self):
+        """兜底补齐女高中生事件状态"""
+        merged = _default_student_state()
+        try:
+            merged.update(self.student_state or {})
+        except Exception:
+            pass
+        self.student_state = merged
+
+    def get_wait_time_multiplier(self) -> float:
+        """根据伙伴加成调整等待时间"""
+        if self.student_state.get('rescued'):
+            trust = self.student_state.get('trust', 0)
+            # 信任越高，等待时间越短，最低0.6倍
+            return max(0.6, 1 - trust * 0.0025)
+        return 1.0
+
+    def register_student_encounter(self):
+        """首次遇到林汐"""
+        self.student_state['met'] = True
+        self.student_state['encounter_rolls'] = self.student_state.get('encounter_rolls', 0)
+        self.student_state['trust'] = max(self.student_state.get('trust', 0), 5)
+        self.save_stats()
+
+    def add_student_food(self, weight: float):
+        """把钓到的鱼分享给林汐，返回更新信息"""
+        if not self.student_state.get('met'):
+            return {'trust_delta': 0, 'ready': False}
+        self.student_state['food_stock'] = round(self.student_state.get('food_stock', 0.0) + weight, 2)
+        trust_gain = 2 if weight >= 1.0 else 1
+        before_trust = self.student_state.get('trust', 0)
+        self.student_state['trust'] = min(100, before_trust + trust_gain)
+        ready = self.student_state['food_stock'] >= 8.0 and not self.student_state.get('rescued')
+        self.save_stats()
+        return {
+            'trust_delta': self.student_state['trust'] - before_trust,
+            'trust': self.student_state['trust'],
+            'food_stock': self.student_state['food_stock'],
+            'ready': ready
+        }
+
+    def try_rescue_student(self):
+        """满足条件后安排救援"""
+        if not self.student_state.get('met'):
+            return False
+        if self.student_state.get('rescued'):
+            return True
+        if self.student_state.get('food_stock', 0) < 8.0:
+            return False
+        self.student_state['rescued'] = True
+        self.student_state['trust'] = max(self.student_state.get('trust', 0), 40)
+        self.save_stats()
+        return True
+
+    def boost_student_trust(self, amount: int = 3):
+        """鼓励对话提升信任"""
+        if not self.student_state.get('met'):
+            return 0
+        before = self.student_state.get('trust', 0)
+        self.student_state['trust'] = min(100, before + amount)
+        self.save_stats()
+        return self.student_state['trust'] - before
     
     def save_stats(self):
         """保存统计数据到文件"""
-        save_statistics(self.fish_statistics, self.money)
+        save_statistics(self.fish_statistics, self.money, self.student_state)
     
     def reset_fishing_state(self):
         """重置钓鱼状态"""
@@ -252,7 +333,8 @@ class FishingManager:
         """计算等待时间（根据鱼的稀有度）"""
         _, _, _, _, _, time_range = fish_info
         min_time, max_time = time_range
-        return random.uniform(min_time, max_time)
+        base_time = random.uniform(min_time, max_time)
+        return base_time * self.game_state.get_wait_time_multiplier()
     
     def set_callbacks(self, on_bite, on_fishing_end):
         """设置回调函数"""
@@ -506,15 +588,24 @@ class HomeScene(BaseScene):
         # 5. 事件地点（留空）
         events_frame = StyledLabelFrame(self.frame, text="📍 事件地点", padding="10")
         events_frame.pack(fill="x", pady=(0, 10))
-        
-        events_label = tk.Label(
+        student_state = self.game_state.student_state
+        if student_state.get('met'):
+            status = "已发现求救，去看看林汐的状况。"
+        else:
+            status = "暂未发现事件，去河流或湖泊多钓鱼试试。"
+        tk.Label(
             events_frame,
-            text="商店、小镇等（预留：后续添加）",
+            text=status,
             font=("Microsoft YaHei", 9),
             bg="#F5F5F5",
-            fg="#888888"
-        )
-        events_label.pack(pady=10)
+            fg="#666666"
+        ).pack(anchor="w", pady=(0, 8))
+        ModernButton(
+            events_frame,
+            text="前往林汐的浅滩",
+            state="normal" if student_state.get('met') else "disabled",
+            command=lambda: self.scene_manager.switch_scene("student")
+        ).pack(side="left", padx=5)
     
     def _sleep(self):
         """睡觉功能"""
@@ -741,6 +832,127 @@ class DataBookScene(BaseScene):
             text="前往钓鱼",
             command=lambda: self.scene_manager.switch_scene("fishing")
         ).pack(pady=10)
+
+
+# ==========================
+# 林汐事件场景
+# ==========================
+class StudentScene(BaseScene):
+    """林汐事件与互动"""
+
+    def create(self):
+        self.frame = ttk.Frame(self.parent)
+        self.frame.pack(fill="both", expand=True)
+
+        title_frame = ttk.Frame(self.frame)
+        title_frame.pack(fill="x", pady=(0, 15))
+
+        tk.Label(
+            title_frame,
+            text="🎒 林汐的临时营地",
+            font=("Microsoft YaHei", 18, "bold"),
+            fg="#4CAAB9",
+            bg="#F5F5F5"
+        ).pack(side="left")
+
+        ModernButton(
+            title_frame,
+            text="返回家中",
+            command=lambda: self.scene_manager.switch_scene("home")
+        ).pack(side="right")
+
+        self.trust_var = tk.StringVar()
+        self.food_var = tk.StringVar()
+        self.status_var = tk.StringVar()
+
+        info_frame = StyledLabelFrame(self.frame, text="📖 事件概况", padding="12")
+        info_frame.pack(fill="x", pady=(0, 12))
+
+        tk.Label(
+            info_frame,
+            textvariable=self.status_var,
+            font=("Microsoft YaHei", 10),
+            bg="#F5F5F5",
+            justify="left",
+            wraplength=560
+        ).pack(anchor="w")
+
+        progress_frame = StyledLabelFrame(self.frame, text="📊 进度", padding="12")
+        progress_frame.pack(fill="x", pady=(0, 12))
+
+        # 信任条
+        ttk.Label(progress_frame, text="信任度").pack(anchor="w")
+        self.trust_bar = ttk.Progressbar(progress_frame, maximum=100, length=520)
+        self.trust_bar.pack(anchor="w", pady=4)
+        ttk.Label(progress_frame, textvariable=self.trust_var, foreground="#4CAAB9").pack(anchor="w")
+
+        # 补给条
+        ttk.Label(progress_frame, text="补给累计 (目标 8kg)" ).pack(anchor="w", pady=(10, 0))
+        self.food_bar = ttk.Progressbar(progress_frame, maximum=8.0, length=520)
+        self.food_bar.pack(anchor="w", pady=4)
+        ttk.Label(progress_frame, textvariable=self.food_var, foreground="#4CAAB9").pack(anchor="w")
+
+        action_frame = StyledLabelFrame(self.frame, text="🤝 互动", padding="12")
+        action_frame.pack(fill="x", pady=(0, 12))
+
+        ModernButton(
+            action_frame,
+            text="聊聊近况（信任+3）",
+            command=self._talk
+        ).pack(side="left", padx=6)
+
+        ModernButton(
+            action_frame,
+            text="安排救援返航",
+            command=self._try_rescue
+        ).pack(side="left", padx=6)
+
+        self._refresh()
+
+    def _refresh(self):
+        state = self.game_state.student_state
+        name = state.get('name', '林汐')
+        trust = state.get('trust', 0)
+        food = state.get('food_stock', 0.0)
+        rescued = state.get('rescued', False)
+        met = state.get('met', False)
+
+        if not met:
+            self.status_var.set("你尚未遇见任何求救信号。去河流或湖泊多钓几次吧！")
+        elif not rescued:
+            self.status_var.set(
+                f"{name} 在浅滩等待，你已向她送去 {food:.2f} kg 的鱼肉。信任越高，救援越顺利。"
+            )
+        else:
+            self.status_var.set(
+                f"{name} 已被安全送回。她现在会陪你钓鱼，缩短上钩等待时间。"
+            )
+
+        self.trust_var.set(f"当前信任度：{trust} / 100")
+        self.food_var.set(f"补给：{food:.2f} / 8.00 kg")
+        self.trust_bar['value'] = trust
+        self.food_bar['value'] = min(8.0, food)
+
+    def _talk(self):
+        gained = self.game_state.boost_student_trust()
+        if gained > 0:
+            messagebox.showinfo("对话", f"你们聊了聊校园趣事，信任+{gained}")
+        else:
+            messagebox.showinfo("对话", "还未遇见林汐，先去钓鱼看看吧。")
+        self._refresh()
+
+    def _try_rescue(self):
+        if self.game_state.try_rescue_student():
+            messagebox.showinfo(
+                "救援成功",
+                "你把补给和绳索送达，林汐安全返回！\n她决定留下来帮忙，钓鱼等待时间将缩短。"
+            )
+        else:
+            messagebox.showwarning(
+                "条件不足",
+                "补给未达 8kg，或尚未遇见求救信号。继续钓鱼积累补给吧！"
+            )
+        self._refresh()
 
 
 # ==========================
@@ -983,6 +1195,7 @@ class FishingScene(BaseScene):
             self.status_var.set("✅ 成功钓到鱼！")
             self.info_var.set(f"恭喜！你成功捕获了 {fish_name}（{weight}kg）！")
             messagebox.showinfo("成功", f"🎉 成功钓到 {fish_name}！\n重量：{weight}kg")
+            self._check_student_event(fish_name, weight)
         else:
             self.status_var.set("❌ 失败")
             self.info_var.set("反应太慢了，鱼儿跑掉了...")
@@ -1000,6 +1213,33 @@ class FishingScene(BaseScene):
         """空格键按下事件处理"""
         if self.game_state.is_bite_occurred:
             self.fishing_manager.try_catch()
+
+    def _check_student_event(self, fish_name: str, weight: float):
+        """检查女高中生事件触发与加成"""
+        state = self.game_state.student_state
+        # 首次遇见：在河流或湖泊捕鱼时概率触发
+        if not state.get('met') and self.location in ("河流", "湖泊"):
+            state['encounter_rolls'] = state.get('encounter_rolls', 0) + 1
+            chance = min(0.6, 0.18 + 0.08 * state['encounter_rolls'])
+            if random.random() < chance:
+                self.game_state.register_student_encounter()
+                messagebox.showinfo(
+                    "漂流瓶",
+                    "你钓起了一个漂流瓶，里面的字条写着：\n\n我是附近高中的社团实习生林汐，被困在浅滩，请带上食物和绳索来帮忙！\n\n回到家中后，可以在事件里找到她的求救位置。"
+                )
+                return
+        # 已遇见但未救出：把鱼分给她，提升信任
+        if state.get('met') and not state.get('rescued'):
+            result = self.game_state.add_student_food(weight)
+            if result.get('trust_delta', 0) > 0:
+                self.info_var.set(
+                    f"你把这条 {fish_name} 分给林汐，信任+{result['trust_delta']} (当前 {result['trust']})"
+                )
+            if result.get('ready'):
+                messagebox.showinfo(
+                    "救援进度",
+                    "林汐的补给已够用了，回家后在事件面板安排救援吧！"
+                )
     
     def destroy(self):
         """销毁场景（解绑按键事件）"""
@@ -1013,7 +1253,7 @@ class FishingScene(BaseScene):
 # 游戏UI界面（主界面管理器）
 # ==========================
 class FishingGameUI:
-    APP_NAME = "🎣 钓鱼小游戏"
+    APP_NAME = "🎣 钓鱼，然后捡到女高中生"
     
     def __init__(self, root):
         self.root = root
@@ -1035,6 +1275,7 @@ class FishingGameUI:
         self.scene_manager.register_scene("home", HomeScene)
         self.scene_manager.register_scene("fishing", FishingScene)
         self.scene_manager.register_scene("data_book", DataBookScene)
+        self.scene_manager.register_scene("student", StudentScene)
         
         # 初始化场景（家场景）
         self.scene_manager.switch_scene("home")
