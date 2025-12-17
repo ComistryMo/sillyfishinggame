@@ -1,0 +1,114 @@
+{
+  "fish_statistics": {
+    "小鲫鱼": {
+      "count": 1,
+      "max_weight": 0.44
+    },
+    "小鲤鱼": {
+      "count": 1,
+      "max_weight": 0.99
+    },
+    "泥鳅": {
+      "count": 0,
+      "max_weight": 0.0
+    },
+    "草鱼": {
+      "count": 0,
+      "max_weight": 0.0
+    },
+    "鲶鱼": {
+      "count": 0,
+      "max_weight": 0.0
+    },
+    "黑鱼": {
+      "count": 0,
+      "max_weight": 0.0
+    },
+    "鳊鱼": {
+      "count": 0,
+      "max_weight": 0.0
+    },
+    "青鱼": {
+      "count": 0,
+      "max_weight": 0.0
+    },
+    "翘嘴鱼": {
+      "count": 0,
+      "max_weight": 0.0
+    },
+    "野生大草鱼": {
+      "count": 0,
+      "max_weight": 0.0
+    },
+    "白鲢": {
+      "count": 0,
+      "max_weight": 0.0
+    },
+    "花鲢": {
+      "count": 0,
+      "max_weight": 0.0
+    },
+    "湖蟹": {
+      "count": 0,
+      "max_weight": 0.0
+    },
+    "湖鲈鱼": {
+      "count": 0,
+      "max_weight": 0.0
+    },
+    "大闸蟹": {
+      "count": 0,
+      "max_weight": 0.0
+    },
+    "大鲢鱼": {
+      "count": 0,
+      "max_weight": 0.0
+    },
+    "野生大鲈鱼": {
+      "count": 0,
+      "max_weight": 0.0
+    },
+    "湖泊巨鲶": {
+      "count": 0,
+      "max_weight": 0.0
+    }
+  },
+  "inventory": {
+    "fish_bag": [],
+    "money": 17.16,
+    "selected_bait": "普通鱼饵",
+    "owned_rods": [
+      "木质竿"
+    ],
+    "equipped_rod": "木质竿",
+    "bait_items": {
+      "普通鱼饵": 3,
+      "高级蚯蚓": 0,
+      "路亚假饵": 0
+    },
+    "gift_items": {
+      "奶茶": 0,
+      "草莓蛋糕": 0,
+      "辣条": 0,
+      "相机冲印券": 0
+    },
+    "craft_items": {
+      "卡式炉": 0
+    },
+    "cooked_items": {
+      "烤鱼": 0
+    }
+  },
+  "student_state": {
+    "name": "林汐",
+    "met": false,
+    "rescued": false,
+    "trust": 0,
+    "food_stock": 0.0,
+    "encounter_rolls": 2,
+    "last_gift_date": null,
+    "daily_request": null,
+    "daily_request_date": null
+  },
+  "last_update": "2025-12-17T12:21:36.363814"
+}
